@@ -6,8 +6,8 @@ target_link_libraries(max6675 PUBLIC
 )
 
 # Compilar exemplos, se existirem
-file(GLOB AHT20_EXAMPLES "examples/*.c")
-foreach(EXAMPLE_FILE ${AHT20_EXAMPLES})
+file(GLOB MAX6675_EXAMPLES "examples/*.c")
+foreach(EXAMPLE_FILE ${MAX6675_EXAMPLES})
     # extrai o nome do arquivo sem extensão
     get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
     
@@ -20,7 +20,7 @@ foreach(EXAMPLE_FILE ${AHT20_EXAMPLES})
     pico_enable_stdio_uart(${EXAMPLE_NAME} 1)
     
     # Linka a lib principal + SDK
-    target_link_libraries(${EXAMPLE_NAME} PRIVATE max6675 pico_stdlib)
+    target_link_libraries(${EXAMPLE_NAME} PRIVATE max6675)
     
     #gera .uf2, .elf, etc
     pico_add_extra_outputs(${EXAMPLE_NAME})
