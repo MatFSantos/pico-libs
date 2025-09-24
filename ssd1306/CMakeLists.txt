@@ -7,8 +7,8 @@ target_link_libraries(ssd1306 PUBLIC
 )
 
 # Compilar exemplos, se existirem
-file(GLOB AHT20_EXAMPLES "examples/*.c")
-foreach(EXAMPLE_FILE ${AHT20_EXAMPLES})
+file(GLOB SSD1306_EXAMPLES "examples/*.c")
+foreach(EXAMPLE_FILE ${SSD1306_EXAMPLES})
     # extrai o nome do arquivo sem extensão
     get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
     
@@ -21,7 +21,7 @@ foreach(EXAMPLE_FILE ${AHT20_EXAMPLES})
     pico_enable_stdio_uart(${EXAMPLE_NAME} 1)
     
     # Linka a lib principal + SDK
-    target_link_libraries(${EXAMPLE_NAME} PRIVATE ssd1306 pico_stdlib hardware_i2c)
+    target_link_libraries(${EXAMPLE_NAME} PRIVATE ssd1306)
     
     #gera .uf2, .elf, etc
     pico_add_extra_outputs(${EXAMPLE_NAME})
