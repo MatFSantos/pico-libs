@@ -21,7 +21,7 @@ foreach(EXAMPLE_FILE ${AHT20_EXAMPLES})
     pico_enable_stdio_uart(${EXAMPLE_NAME} 1)
     
     # Linka a lib principal + SDK
-    target_link_libraries(${EXAMPLE_NAME} PRIVATE aht20 pico_stdlib hardware_i2c)
+    target_link_libraries(${EXAMPLE_NAME} PRIVATE aht20)
     
     # gera .uf2, .elf, etc
     pico_add_extra_outputs(${EXAMPLE_NAME})
