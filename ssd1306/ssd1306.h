@@ -2,10 +2,11 @@
 #define SSD1306_H
 
 #include <stdlib.h>
+#include <string.h>
 #include <pico/stdlib.h>
 #include <hardware/i2c.h>
 
-#define I2C_ADDRESS 0x3C
+#define SSD1306_ADDRESS 0x3C
 
 typedef enum {
     SET_CONTRAST = 0x81,
@@ -165,5 +166,17 @@ void ssd1306_draw_char(ssd1306_t *ssd, char c, uint8_t x, uint8_t y);
  * @param y Coordenada y do canto superior esquerdo do primeiro caractere.
  */
 void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y);
+
+/**
+ * @brief Atualiza o display com uma string, opcionalmente desenhando uma borda e limpando a tela antes.
+ *  A string é centralizada horizontalmente.
+ * 
+ * @param ssd Ponteiro para a estrutura do display SSD1306.
+ * @param str Ponteiro para a string a ser desenhada. Deve estar na faixa ASCII de 32 a 126.
+ * @param y Coordenada y do canto superior esquerdo do primeiro caractere.
+ * @param draw_border true para desenhar uma borda ao redor da string, false para não desenhar.
+ * @param clear true para limpar a tela antes de desenhar, false para não limpar.
+ */
+void ssd1306_draw_centered(ssd1306_t *ssd, const char *str, uint8_t y, bool draw_border, bool clear);
 
 #endif // SSD1306_H

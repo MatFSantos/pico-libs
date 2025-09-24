@@ -95,7 +95,7 @@ void ssd1306_rect(
     // duas linhas horizontais paralelas, com uma distância de 'height' entre elas
     for (uint8_t x = left; x < left + width; ++x) {
         ssd1306_pixel(ssd, x, top, color);
-        sdd1306_pixel(ssd, x, top + height - 1, color);
+        ssd1306_pixel(ssd, x, top + height - 1, color);
     }
 
     // duas linhas verticais paralelas, com uma distância de 'width' entre elas
@@ -166,7 +166,7 @@ void ssd1306_draw_char(ssd1306_t *ssd, char c, uint8_t x, uint8_t y) {
 
     // Desenha o caractere na tela
     for (uint8_t i = 0; i < 8; ++i) {
-        uint8_t line = font[index + i]; // Acessa a linha correspondente do caractere na fonte
+        uint8_t line = ssd1306_font_8x8[index + i]; // Acessa a linha correspondente do caractere na fonte
         for (uint8_t j = 0; j < 8; ++j) {
             ssd1306_pixel(ssd, x + i, y + j, line & (1 << j)); // Desenha cada pixel do caractere
         }
@@ -185,4 +185,14 @@ void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y) 
             break;
         }
     }
+}
+
+void ssd1306_draw_centered(ssd1306_t *ssd, const char *str, uint8_t y, bool draw_border, bool clear) {
+    if (clear) {
+        ssd1306_fill(ssd, false);
+    }
+    if (draw_border) {
+        ssd1306_rect(ssd, 0, 0, ssd->width, ssd->height, true, false);
+    }
+    ssd1306_draw_string(ssd, str, (ssd->width - (strlen(str) * 8)) / 2, y);
 }
