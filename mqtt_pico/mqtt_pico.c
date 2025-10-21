@@ -1,55 +1,13 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
-#include "pico/stdlib.h"     // Biblioteca da Raspberry Pi Pico para funções padrão (GPIO, temporização, etc.)
-#include "pico/cyw43_arch.h" // Biblioteca para arquitetura Wi-Fi da Pico com CYW43
-#include "pico/unique_id.h"  // Biblioteca com recursos para trabalhar com os pinos GPIO do Raspberry Pi Pico
-
-#include "lwip/apps/mqtt.h"      // Biblioteca LWIP MQTT -  fornece funções e recursos para conexão MQTT
-#include "lwip/apps/mqtt_priv.h" // Biblioteca que fornece funções e recursos para Geração de Conexões
-#include "lwip/dns.h"            // Biblioteca que fornece funções e recursos suporte DNS:
-#include "lwip/altcp_tls.h"      // Biblioteca que fornece funções e recursos para conexões seguras usando TLS:
-
 #include "mqtt_pico.h"
 
-bool mqtt_start(
-    mqtt_config_t * mqtt,
-    char *device_name,
-    uint keep_alive,
-    char *username,
-    char *password,
-    char *will_topic,
-    char *will_msg,
-    uint8_t will_qos,
-    uint8_t sub_qos,
-    uint8_t pub_qos,
-    bool retain,
-    bool unique_topic
-) {
-    mqtt->client_info.client_id = mqtt_generate_client_id(device_name);
-
-    if (!mqtt->client_info.client_id) {
-        return false; // erro ao criar o client_id unico
-    }
-
-    mqtt->client_info.client_user = username;
-    mqtt->client_info.client_pass = password;
-    mqtt->client_info.keep_alive = keep_alive;
-    mqtt->client_info.will_msg = will_msg;
-    mqtt->client_info.will_qos = will_qos;
-    mqtt->client_info.will_retain = true;
-    mqtt->sub_qos = sub_qos;
-    mqtt->pub_qos = pub_qos;
-    mqtt->unique_topic = unique_topic;
-
-    char *_topic_buf = malloc(MQTT_TOPIC_LEN);
-    if (!_topic_buf) {
-        return false;
-    }
-    strncpy(_topic_buf, mqtt_full_topic(mqtt, will_topic), MQTT_TOPIC_LEN);
-    mqtt->client_info.will_topic = _topic_buf;
-
+/**
+ * @brief Inicializa as configurações TLS de um cliente, se disponíveis
+ *
+ * @param[out] mqtt        Ponteiro para a estrutura de configuração MQTT
+ *
+ * @see mqtt_start_client, mqtt_manage_topics
+ */
+void mqtt_tls(mqtt_config_t * mqtt) {
     #if LWIP_ALTCP && LWIP_ALTCP_TLS // TLS enable
         #ifdef MQTT_CERT_INC
             const uint8_t ca_cert[] = TLS_ROOT_CERT;
@@ -71,10 +29,32 @@ bool mqtt_start(
             mqtt->client_info.tls_config = altcp_tls_create_config_client(NULL, 0);
         #endif
     #endif
-
-    return true;
 }
 
+/**
+ * @brief Inicializa o cliente MQTT, conecta ao broker e define callbacks para eventos.
+ *
+ * Esta função configura o cliente MQTT com os parâmetros fornecidos, tenta
+ * estabelecer a conexão com o broker e registra funções de callback para lidar
+ * com eventos de conexão e mensagens recebidas.
+ *
+ * @param[in] mqtt            Ponteiro para a estrutura de configuração do cliente MQTT. Não deve ser NULL.
+ * @param[in] server          Endereço ou hostname do broker MQTT.
+ * @param[in] conn_cb         Callback chamado quando a conexão com o broker é estabelecida ou perdida.
+ * @param[in] pub_cb Callback chamado quando uma nova publicação chega em um tópico inscrito.
+ * @param[in] data_cb Callback chamado quando os dados de uma publicação estão disponíveis.
+ * @param[in] dns_cb Callback chamado no pedido de DNS ao servidor. Esse callback só é chamado em casos onde o status
+ *      retornado `dns_gethostbyname` é `ERR_INPROGRESS`.
+ *
+ * @return bool em caso de sucesso na configuração e conexão do cliente MQTT. Retorna false caso contrário.
+ *
+ * @note Esta função deve ser chamada antes de tentar publicar ou assinar tópicos. É necessário que a arquitetura
+ *      CYW43 esteja em operação, e a mesma esteja conectada a uma rede WiFi, em modo Station.
+ * @warning Certifique-se de que os callbacks fornecidos permanecem válidos
+ *          durante todo o ciclo de vida do cliente MQTT.
+ *
+ * @see mqtt_sub_unsub, mqtt_manage_topics
+ */
 bool mqtt_start_client(
     mqtt_config_t *mqtt,
     char *server,
@@ -114,8 +94,26 @@ bool mqtt_start_client(
     #endif
     mqtt_set_inpub_callback(mqtt->client, pub_cb, data_cb, mqtt);
     cyw43_arch_lwip_end();
+
+    return true;
 }
 
+/**
+ * @brief Gera um ID de cliente MQTT único baseado no nome do dispositivo e no ID único do hardware.
+ *
+ * O ID do cliente é construído no formato: `<device_name>-<unique_id>`.
+ * Exemplo: `smartmeter-a1b2c`. Este ID pode ser usado para identificar
+ * o dispositivo de forma única no broker MQTT.
+ *
+ * @param[in] device_name Nome arbitrário do dispositivo. Não deve ser NULL.
+ * @return char* Ponteiro para uma string alocada dinamicamente contendo
+ *              o Client ID. O chamador é responsável por liberar a memória
+ *              usando `free()`.
+ *
+ * @note O tamanho do Client ID depende do comprimento de `device_name`
+ *       e do tamanho do ID único do hardware.
+ * @warning Certifique-se de chamar `free()` após usar a string para evitar vazamento de memória.
+ */
 char *mqtt_generate_client_id(char *device_name) {
     const int UNIQUE_ID_LEN = 5;
     const int DEVICE_NAME_LEN = strlen(device_name);
@@ -138,106 +136,67 @@ char *mqtt_generate_client_id(char *device_name) {
     return client_id;
 }
 
+/**
+ * @brief Gera o tópico MQTT completo, acrescentando o nome do cliente se necessário.
+ *
+ * Esta função combina o nome do cliente MQTT com o nome do tópico base fornecido,
+ * criando uma string de tópico completa que pode ser usada para publicar ou
+ * assinar mensagens.
+ * Exemplo: se o cliente tiver ID `smartmeter` e `name` for `/led`, o resultado
+ * pode ser `/smartmeter/led`.
+ *
+ * @param[in] mqtt Ponteiro para a estrutura de configuração do cliente MQTT. Não deve ser NULL.
+ * @param[in] name Nome do tópico base. Não deve ser NULL.
+ *
+ * @return char* Ponteiro para uma string alocada dinamicamente contendo o tópico completo.
+ *               O conteúdo **não deve ser liberado** pelo chamador e
+ *               **pode ser sobrescrito em chamadas subsequentes**.
+ *
+ * @note O formato exato do tópico depende de como o cliente MQTT foi configurado.
+ */
 char *mqtt_full_topic(mqtt_config_t *mqtt, char *name) {
     if (mqtt->unique_topic) {
         static char full_topic[MQTT_TOPIC_LEN];
-        snprintf(full_topic, MQTT_TOPIC_LEN, "/%s%s", mqtt->client_info.client_id, name);
+        snprintf(full_topic, MQTT_TOPIC_LEN, "%s/%s", mqtt->client_info.client_id, name);
         return full_topic;
     } else {
         return name;
     }
 }
 
+/**
+ * @brief Gerencia inscrições ou remoções em múltiplos tópicos MQTT.
+ *
+ * Esta função percorre uma lista de tópicos e realiza a ação especificada
+ * (inscrição ou remoção) em cada um deles, chamando o callback fornecido
+ * após cada operação, se aplicável.
+ *
+ * @param[in] mqtt       Ponteiro para a estrutura de configuração do cliente MQTT. Não deve ser NULL.
+ * @param[in] topics     Array de strings contendo os nomes dos tópicos.
+ * @param[in] num_topics Número de tópicos presentes no array `topics`.
+ * @param[in] action     Ação a ser realizada em cada tópico: MQTT_SUBSCRIBE ou MQTT_UNSUBSCRIBE.
+ * @param[in] cb         Callback opcional para notificação do resultado de cada subscribe/unsubscribe.
+ *                       Pode ser NULL se não houver necessidade de callback.
+ *
+ * @note O array `topics` **não deve ser NULL** e deve conter pelo menos `num_topics` elementos válidos.
+ * @note Esta função **não copia** os tópicos, apenas referencia os ponteiros fornecidos.
+ *
+ * @see mqtt_sub_unsub, mqtt_config_t, mqtt_action_t
+ *
+ * @code
+ * // Exemplo de uso:
+ * char *topics[] = { "/led", "/beep", "/ping", "/exit" };
+ * size_t num_topics = sizeof(topics) / sizeof(topics[0]);
+ *
+ * // Inscreve nos tópicos com callback
+ * mqtt_manage_topics(&mqtt, topics, num_topics, MQTT_SUBSCRIBE, my_callback);
+ *
+ * // Remove inscrições nos tópicos sem callback
+ * mqtt_manage_topics(&mqtt, topics, num_topics, MQTT_UNSUBSCRIBE, NULL);
+ * @endcode
+ */
 void mqtt_manage_topics(mqtt_config_t *mqtt, char **topics, size_t num_topics, mqtt_action_t action, mqtt_request_cb_t cb) {
     for (int i = 0; i < num_topics; i++) {
-        mqtt_sub_unsub(mqtt->client, mqtt_full_topic(mqtt, topics[i]), mqtt->sub_qos, cb, mqtt, action);
-    }
-}
-
-/** ---------------------------------------------------------------------------- */
-/**-------------------- funções genericas para ser usadas como callback -------- */
-
-void mqtt_dns_found(const char *hostname, const ip_addr_t *ipaddr, void *arg) {
-    mqtt_config_t *mqtt = (mqtt_config_t *)arg;
-    if (ipaddr) {
-        mqtt->server_ip = *ipaddr;
-    } else {
-        printf("[MQTT ERROR] DNS REQUEST FAILED");
-    }
-}
-
-void mqtt_g_pub_cb(__unused void *arg, err_t err) {
-    if (err != 0) {
-        printf("[MQTT ERROR] Error during publish data: %d", err);
-    }
-}
-
-void mqtt_g_sub_cb(void *arg, err_t err) {
-    mqtt_config_t *mqtt = (mqtt_config_t *) arg;
-    if (err != 0) {
-        return;
-    }
-    mqtt->sub_count++;
-}
-
-void mqtt_g_unsub_cb(void *arg, err_t err){
-    mqtt_config_t *mqtt = (mqtt_config_t *) arg;
-    if (err != 0) {
-        return;
-    }
-    mqtt->sub_count--;
-
-    if (mqtt->sub_count <= 0 && mqtt->stop_client) {
-        mqtt_disconnect(mqtt->client);
-    }
-}
-
-void mqtt_g_in_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags) {
-    mqtt_config_t *mqtt = (mqtt_config_t *)arg;
-
-    strncpy(mqtt->data.data, (const char *)data, len);
-    mqtt->data.len = (uint32_t) len;
-    mqtt->data.data[len] = '\0';
-}
-
-void mqtt_g_in_pub_cb(void *arg, const char *topic, u32_t tot_len) {
-    mqtt_config_t *mqtt = (mqtt_config_t *)arg;
-    
-    size_t len = strlen(topic);
-    if (len >= sizeof(mqtt->data.topic)) { // verifica para nao passar do tamanho do buffer topic
-        len = sizeof(mqtt->data.topic) - 1;
-    }
-
-    memcpy(mqtt->data.topic, topic, len);
-    mqtt->data.topic[len] = '\0';
-}
-
-void mqtt_g_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status) {
-    mqtt_config_t *mqtt = (mqtt_config_t *) arg;
-
-    if (status == MQTT_CONNECT_ACCEPTED) {
-        mqtt->connect_done = true;
-        char *topics[] = {"/test"};
-        size_t num_topics = sizeof(topics)/sizeof(topics[0]);
-        mqtt_manage_topics(mqtt, topics, num_topics, MQTT_SUBSCRIBE, mqtt_g_sub_cb);
-
-        if (mqtt->client_info.will_topic) {
-            mqtt_publish(
-                mqtt->client,
-                mqtt->client_info.will_topic,
-                "1",
-                1,
-                mqtt->client_info.will_qos,
-                mqtt->client_info.will_retain,
-                mqtt_g_pub_cb,
-                mqtt
-            );
-        }
-    } else if (status == MQTT_CONNECT_DISCONNECTED) {
-        if (!mqtt->connect_done) {
-            printf("[MQTT ERROR] FAILED TO CONNECT TO MQTT SERVER");
-        }
-    } else {
-        printf("[MQTT ERROR] UNEXPECTED CONNECT STATUS");
+        mqtt_sub_unsub(mqtt->client, topics[i], mqtt->sub_qos, cb, mqtt, action);
     }
 }
